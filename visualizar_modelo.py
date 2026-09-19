@@ -1,4 +1,6 @@
 import joblib
+import pandas as pd
+import plotly.graph_objects as go
 import spacy
 import streamlit as st
 
@@ -31,8 +33,64 @@ st.markdown(
     }
 
     .block-container {
-        max-width: 980px;
+        max-width: 1180px;
         padding: 4.5rem 2rem 5rem;
+    }
+
+    .console-line {
+        align-items: center;
+        border-bottom: 1px solid #242424;
+        border-top: 1px solid #242424;
+        color: #777;
+        display: flex;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.68rem;
+        justify-content: space-between;
+        letter-spacing: 0.12em;
+        margin: 0.8rem 0 2rem;
+        padding: 0.7rem 0;
+        text-transform: uppercase;
+    }
+
+    .status-dot {
+        background: #ff3b45;
+        border-radius: 50%;
+        box-shadow: 0 0 12px #e50914;
+        display: inline-block;
+        height: 7px;
+        margin-right: 0.45rem;
+        width: 7px;
+    }
+
+    .result-card {
+        background: linear-gradient(145deg, rgba(30,30,30,0.92), rgba(7,7,7,0.96));
+        border: 1px solid #3a191b;
+        border-left: 3px solid var(--red);
+        box-shadow: 0 18px 45px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.05);
+        padding: 1.15rem 1.3rem;
+    }
+
+    .result-label {
+        color: #888;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.7rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+    }
+
+    .result-value {
+        color: #ff5a61;
+        font-family: 'UnifrakturCook', 'Old English Text MT', Georgia, serif;
+        font-size: 2.8rem;
+        line-height: 1.1;
+        margin-top: 0.35rem;
+    }
+
+    .result-meta {
+        color: var(--muted);
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.82rem;
+        margin-top: 0.6rem;
     }
 
     .brand-kicker {
@@ -123,6 +181,13 @@ st.markdown(
         padding: 0.7rem;
     }
 
+    [data-testid="stPlotlyChart"] {
+        background: radial-gradient(circle at 50% 42%, rgba(100, 9, 16, 0.18), transparent 48%), #080808;
+        border: 1px solid #2e2021;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 45px rgba(0,0,0,0.28);
+        padding: 0.35rem;
+    }
+
     footer { visibility: hidden; }
     </style>
     """,
@@ -150,6 +215,10 @@ st.markdown(
     <div class="brand-kicker">Central de operações · modelo ativo</div>
     <h1 class="brand-title">Classificador de Chamados</h1>
     <div class="brand-rule"></div>
+    <div class="console-line">
+        <span><span class="status-dot"></span>Neural routing online</span>
+        <span>TF-IDF / MULTINOMIAL NB · v1.0</span>
+    </div>
     """,
     unsafe_allow_html=True,
 )
@@ -161,9 +230,9 @@ except Exception as erro:
     st.error(f"Não foi possível carregar o modelo: {erro}")
     st.stop()
 
-st.subheader("Modelo carregado")
-st.write(f"Pipeline: `{type(modelo).__name__}`")
-st.write(f"Etapas: `{', '.join(modelo.named_steps)}`")
+with st.expander("Detalhes do núcleo de classificação", expanded=False):
+    st.write(f"Pipeline: `{type(modelo).__name__}`")
+    st.write(f"Etapas: `{', '.join(modelo.named_steps)}`")
 
 texto = st.text_area(
     "Descrição do chamado",
@@ -171,7 +240,7 @@ texto = st.text_area(
     height=120,
 )
 
-if st.button("Classificar chamado", type="primary"):
+if st.button("Classificar chamado", type="primary", use_container_width=True):
     if not texto.strip():
         st.warning("Digite uma descrição antes de classificar.")
     else:
@@ -180,9 +249,76 @@ if st.button("Classificar chamado", type="primary"):
         probabilidades = modelo.predict_proba([texto_processado])[0]
         classes = modelo.classes_
 
-        st.success(f"Categoria prevista: {categoria}")
-        st.subheader("Probabilidades")
-        st.bar_chart(
-            {classe: float(probabilidade) for classe, probabilidade in zip(classes, probabilidades)},
-            horizontal=True,
+        indice_maior_probabilidade = probabilidades.argmax()
+        maior_probabilidade = float(probabilidades[indice_maior_probabilidade])
+        st.markdown(
+            f"""
+            <div class="result-card">
+                <div class="result-label">Diagnóstico dominante</div>
+                <div class="result-value">{categoria}</div>
+                <div class="result-meta">Confiança do modelo: {maior_probabilidade:.1%} · análise concluída agora</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+        st.markdown("### Mapa 3D de confiança")
+        st.caption("Gire, aproxime e explore as torres para comparar a leitura do classificador.")
+
+        cores = ["#e50914", "#ff4b55", "#a70710", "#ff858a", "#6e050b", "#d9232e"]
+        x_positions = list(range(len(classes)))
+        figura = go.Figure()
+
+        for indice, (classe, probabilidade) in enumerate(zip(classes, probabilidades)):
+            probabilidade = float(probabilidade)
+            figura.add_trace(
+                go.Scatter3d(
+                    x=[indice, indice],
+                    y=[0, 0],
+                    z=[0, probabilidade],
+                    mode="lines+markers+text",
+                    text=["", f"{probabilidade:.0%}"],
+                    textposition="top center",
+                    textfont={"color": "#f4f0e6", "size": 13},
+                    line={"color": cores[indice % len(cores)], "width": 14},
+                    marker={
+                        "color": cores[indice % len(cores)],
+                        "size": [4, 14 + probabilidade * 24],
+                        "line": {"color": "#ffb3b6", "width": 1},
+                    },
+                    name=classe,
+                    hovertemplate=f"<b>{classe}</b><br>Confiança: {probabilidade:.1%}<extra></extra>",
+                )
+            )
+
+        figura.update_layout(
+            height=520,
+            margin={"l": 0, "r": 0, "t": 20, "b": 0},
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font={"color": "#a8a49a", "family": "Space Grotesk, sans-serif"},
+            legend={"orientation": "h", "y": 0.02, "x": 0.02, "font": {"size": 11}},
+            scene={
+                "bgcolor": "rgba(0,0,0,0)",
+                "camera": {"eye": {"x": 1.55, "y": 1.55, "z": 1.1}},
+                "xaxis": {
+                    "tickvals": x_positions,
+                    "ticktext": classes,
+                    "showgrid": True,
+                    "gridcolor": "#321a1c",
+                    "zerolinecolor": "#572126",
+                    "title": "Categoria",
+                },
+                "yaxis": {"visible": False, "range": [-0.3, 0.3]},
+                "zaxis": {
+                    "range": [0, 1.08],
+                    "tickformat": ".0%",
+                    "showgrid": True,
+                    "gridcolor": "#321a1c",
+                    "zerolinecolor": "#572126",
+                    "title": "Confiança",
+                },
+            },
+            showlegend=True,
+        )
+        st.plotly_chart(figura, use_container_width=True, config={"displaylogo": False})
